@@ -276,6 +276,14 @@ static void test_deadline_is_exclusive(void)
     CHECK(controller.fault == FI_FAULT_AUTH_TIMEOUT);
 }
 
+static void test_timeout_configuration_outside_wrap_safe_range_is_rejected(void)
+{
+    fi_controller_t controller;
+    fi_controller_reset(&controller, 1u, 0x80000000u, 2000u);
+    CHECK(controller.state == FI_STATE_FAULT);
+    CHECK(fi_controller_arrive(&controller, 1u, 1u, 0u) == FI_CONTROL_INVALID_STATE);
+}
+
 static void test_action_transitions_reject_expired_deadline_without_tick(void)
 {
     fi_controller_t controller;
@@ -374,6 +382,7 @@ int main(void)
     run_test("controller duplicate and job rejection", test_controller_rejects_duplicate_and_wrong_job);
     run_test("controller local deadlines", test_controller_enforces_local_deadlines);
     run_test("deadline is exclusive", test_deadline_is_exclusive);
+    run_test("invalid timeout is rejected", test_timeout_configuration_outside_wrap_safe_range_is_rejected);
     run_test("expired transitions without tick", test_action_transitions_reject_expired_deadline_without_tick);
     run_test("controller wrong exit fault", test_controller_faults_on_wrong_exit);
     run_test("controller session reset", test_controller_rejects_previous_session_after_reset);

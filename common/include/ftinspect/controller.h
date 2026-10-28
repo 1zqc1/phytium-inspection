@@ -28,7 +28,8 @@ typedef enum {
     FI_FAULT_NONE = 0,
     FI_FAULT_AUTH_TIMEOUT,
     FI_FAULT_ACTION_TIMEOUT,
-    FI_FAULT_WRONG_EXIT
+    FI_FAULT_WRONG_EXIT,
+    FI_FAULT_INVALID_TIMEOUT
 } fi_fault_t;
 
 typedef enum {

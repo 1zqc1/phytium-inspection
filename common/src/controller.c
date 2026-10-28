@@ -45,6 +45,10 @@ void fi_controller_reset(
     controller->session_id = session_id;
     controller->auth_timeout_ms = auth_timeout_ms;
     controller->action_timeout_ms = action_timeout_ms;
+    if (auth_timeout_ms >= 0x80000000u || action_timeout_ms >= 0x80000000u) {
+        controller->state = FI_STATE_FAULT;
+        controller->fault = FI_FAULT_INVALID_TIMEOUT;
+    }
 }
 
 fi_control_result_t fi_controller_arrive(
