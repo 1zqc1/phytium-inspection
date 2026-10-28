@@ -212,6 +212,12 @@ static void test_stream_timeout_preserves_new_frame_start(void)
     }
     CHECK(fi_stream_decoder_feed_timed(&decoder, bytes[length - 1u], &output, &status, 11u, 10u) == FI_STREAM_FRAME_READY);
     CHECK(output.job_id == input.job_id);
+
+    fi_stream_decoder_init(&decoder);
+    CHECK(fi_stream_decoder_feed_timed(&decoder, 0xA5u, &output, &status, 0xFFFFFFFCu, 10u) == FI_STREAM_NEED_MORE);
+    CHECK(fi_stream_decoder_feed_timed(&decoder, 0xA5u, &output, &status, 6u, 10u) == FI_STREAM_FRAME_DROPPED);
+    CHECK(status == FI_ERR_TIMEOUT);
+    CHECK(decoder.length == 1u);
 }
 
 static void drive_to_wait_result(fi_controller_t *controller, uint32_t session, uint32_t job)
@@ -334,6 +340,11 @@ static void test_heartbeat_gates_actions(void)
     CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(fi_controller_route_ready(&controller, 7u, 800u) == FI_CONTROL_HEARTBEAT_LOST);
     CHECK(controller.state == FI_STATE_FAULT);
+
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    CHECK(fi_controller_heartbeat(&controller, 0x1001u, 0xFFFFFFF0u) == FI_CONTROL_OK);
+    CHECK(fi_controller_arrive(&controller, 0x1001u, 7u, 10u) == FI_CONTROL_OK);
+    CHECK(fi_controller_tick(&controller, 284u) == FI_CONTROL_HEARTBEAT_LOST);
 }
 
 static void test_deadline_is_exclusive(void)

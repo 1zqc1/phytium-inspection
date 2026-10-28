@@ -6,7 +6,7 @@
 
 ## 公共代码接入
 
-Linux C++ 应用可直接编译 `common/src`，公开头文件已提供 `extern "C"`。串口线程只负责字节收发和时间戳，完整帧由 `fi_stream_decoder_feed` 产生。业务线程保存当前会话号、工件号和单调递增序号，并把推理结果编码为 `FI_MSG_RESULT`。
+Linux C++ 应用可直接编译 `common/src`，公开头文件已提供 `extern "C"`。串口线程负责字节收发和单调时间戳，通过 `fi_stream_decoder_feed_timed` 处理帧间断流；字节间超时阈值须按实际串口调度测定。业务线程保存当前会话号、工件号和单调递增序号，并把推理结果编码为 `FI_MSG_RESULT`。
 
 建议模块边界：
 
