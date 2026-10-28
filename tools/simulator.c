@@ -104,8 +104,8 @@ static int simulate_completed_route(fi_route_t route, fi_sim_report_t *report)
         != FI_CONTROL_OK) {
         return 1;
     }
-    if (fi_controller_route_ready(&controller, 1u) != FI_CONTROL_OK
-        || fi_controller_release_started(&controller, 1u) != FI_CONTROL_OK
+    if (fi_controller_route_ready(&controller, 1u, 600u) != FI_CONTROL_OK
+        || fi_controller_release_started(&controller, 1u, 700u) != FI_CONTROL_OK
         || fi_controller_confirm_exit(&controller, SIM_SESSION, 1u, route, 900u)
             != FI_CONTROL_OK) {
         return 1;
@@ -155,8 +155,8 @@ int fi_simulate_duplicate(fi_sim_report_t *report)
     if (prepare_job(&controller, 1u) != 0
         || deliver_result(&controller, &decoder, 1u, 1u, FI_ROUTE_PASS, 500u, 0, report)
             != FI_CONTROL_OK
-        || fi_controller_route_ready(&controller, 1u) != FI_CONTROL_OK
-        || fi_controller_release_started(&controller, 1u) != FI_CONTROL_OK
+        || fi_controller_route_ready(&controller, 1u, 600u) != FI_CONTROL_OK
+        || fi_controller_release_started(&controller, 1u, 700u) != FI_CONTROL_OK
         || fi_controller_confirm_exit(&controller, SIM_SESSION, 1u, FI_ROUTE_PASS, 900u)
             != FI_CONTROL_OK) {
         return 1;

@@ -5,7 +5,7 @@
 
 static int deadline_passed(uint32_t now_ms, uint32_t deadline_ms)
 {
-    return (int32_t)(now_ms - deadline_ms) > 0;
+    return (int32_t)(now_ms - deadline_ms) >= 0;
 }
 
 static fi_control_result_t enter_fault(fi_controller_t *controller, fi_fault_t fault)
@@ -131,7 +131,7 @@ fi_control_result_t fi_controller_apply_result(
     return FI_CONTROL_OK;
 }
 
-fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint32_t job_id)
+fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint32_t job_id, uint32_t now_ms)
 {
     if (controller == NULL) {
         return FI_CONTROL_ERR_ARGUMENT;
@@ -142,11 +142,14 @@ fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint3
     if (job_id != controller->job_id) {
         return FI_CONTROL_JOB_MISMATCH;
     }
+    if (deadline_passed(now_ms, controller->action_deadline_ms)) {
+        return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
+    }
     controller->state = FI_STATE_RELEASE;
     return FI_CONTROL_OK;
 }
 
-fi_control_result_t fi_controller_release_started(fi_controller_t *controller, uint32_t job_id)
+fi_control_result_t fi_controller_release_started(fi_controller_t *controller, uint32_t job_id, uint32_t now_ms)
 {
     if (controller == NULL) {
         return FI_CONTROL_ERR_ARGUMENT;
@@ -156,6 +159,9 @@ fi_control_result_t fi_controller_release_started(fi_controller_t *controller, u
     }
     if (job_id != controller->job_id) {
         return FI_CONTROL_JOB_MISMATCH;
+    }
+    if (deadline_passed(now_ms, controller->action_deadline_ms)) {
+        return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
     }
     controller->state = FI_STATE_VERIFY;
     return FI_CONTROL_OK;

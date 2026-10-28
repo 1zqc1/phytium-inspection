@@ -76,8 +76,8 @@ fi_control_result_t fi_controller_apply_result(
     uint32_t seq,
     fi_route_t route,
     uint32_t now_ms);
-fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint32_t job_id);
-fi_control_result_t fi_controller_release_started(fi_controller_t *controller, uint32_t job_id);
+fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint32_t job_id, uint32_t now_ms);
+fi_control_result_t fi_controller_release_started(fi_controller_t *controller, uint32_t job_id, uint32_t now_ms);
 fi_control_result_t fi_controller_confirm_exit(
     fi_controller_t *controller,
     uint32_t session_id,

@@ -212,9 +212,9 @@ static void test_controller_completes_one_normal_job(void)
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_SET_ROUTE);
-    CHECK(fi_controller_route_ready(&controller, 7u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 600u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_RELEASE);
-    CHECK(fi_controller_release_started(&controller, 7u) == FI_CONTROL_OK);
+    CHECK(fi_controller_release_started(&controller, 7u, 700u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_VERIFY);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_PASS, 900u) == FI_CONTROL_OK);
@@ -235,8 +235,8 @@ static void test_controller_rejects_duplicate_and_wrong_job(void)
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_REVIEW, 400u) == FI_CONTROL_OK);
     CHECK(controller.route == FI_ROUTE_REVIEW);
-    CHECK(fi_controller_route_ready(&controller, 7u) == FI_CONTROL_OK);
-    CHECK(fi_controller_release_started(&controller, 7u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 500u) == FI_CONTROL_OK);
+    CHECK(fi_controller_release_started(&controller, 7u, 600u) == FI_CONTROL_OK);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_REVIEW, 700u) == FI_CONTROL_OK);
 
@@ -266,6 +266,32 @@ static void test_controller_enforces_local_deadlines(void)
     CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
 }
 
+static void test_deadline_is_exclusive(void)
+{
+    fi_controller_t controller;
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    CHECK(fi_controller_apply_result(
+        &controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 1100u) == FI_CONTROL_EXPIRED);
+    CHECK(controller.fault == FI_FAULT_AUTH_TIMEOUT);
+}
+
+static void test_action_transitions_reject_expired_deadline_without_tick(void)
+{
+    fi_controller_t controller;
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 2500u) == FI_CONTROL_EXPIRED);
+    CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 2499u) == FI_CONTROL_OK);
+    CHECK(fi_controller_release_started(&controller, 7u, 2500u) == FI_CONTROL_EXPIRED);
+    CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
+}
+
 static void test_controller_faults_on_wrong_exit(void)
 {
     fi_controller_t controller;
@@ -274,8 +300,8 @@ static void test_controller_faults_on_wrong_exit(void)
     drive_to_wait_result(&controller, 0x1001u, 7u);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
-    CHECK(fi_controller_route_ready(&controller, 7u) == FI_CONTROL_OK);
-    CHECK(fi_controller_release_started(&controller, 7u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 600u) == FI_CONTROL_OK);
+    CHECK(fi_controller_release_started(&controller, 7u, 700u) == FI_CONTROL_OK);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_REVIEW, 900u) == FI_CONTROL_ROUTE_MISMATCH);
     CHECK(controller.state == FI_STATE_FAULT);
@@ -347,6 +373,8 @@ int main(void)
     run_test("controller normal job", test_controller_completes_one_normal_job);
     run_test("controller duplicate and job rejection", test_controller_rejects_duplicate_and_wrong_job);
     run_test("controller local deadlines", test_controller_enforces_local_deadlines);
+    run_test("deadline is exclusive", test_deadline_is_exclusive);
+    run_test("expired transitions without tick", test_action_transitions_reject_expired_deadline_without_tick);
     run_test("controller wrong exit fault", test_controller_faults_on_wrong_exit);
     run_test("controller session reset", test_controller_rejects_previous_session_after_reset);
     run_test("simulator scenarios", test_simulator_scenarios_have_expected_outcomes);

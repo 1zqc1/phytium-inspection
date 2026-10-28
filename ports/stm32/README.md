@@ -41,6 +41,8 @@ fi_controller_confirm_exit
 
 主循环或 1 ms 定时任务调用 `fi_controller_tick`。进入 `FI_STATE_FAULT` 后关闭放行授权，由人工清障并用新的会话号调用 `fi_controller_reset`。
 
+`fi_controller_route_ready` 和 `fi_controller_release_started` 需要传入当前单调毫秒计数；截止时刻本身即已超时。调用方仍须在动作前落实硬件禁能并检查心跳；当前公共核心尚未实现心跳门控，不可仅凭这些检查直接上板。
+
 ## 首次实板检查
 
 1. 保持两只舵机断电，只验证下载、串口收发和复位行为。
