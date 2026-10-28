@@ -8,11 +8,36 @@ static int deadline_passed(uint32_t now_ms, uint32_t deadline_ms)
     return (int32_t)(now_ms - deadline_ms) >= 0;
 }
 
+static int heartbeat_fresh(const fi_controller_t *controller, uint32_t now_ms)
+{
+    return controller->heartbeat_seen && (uint32_t)(now_ms - controller->last_heartbeat_ms) < 300u;
+}
+
+static fi_control_result_t heartbeat_fault(fi_controller_t *controller)
+{
+    controller->state = FI_STATE_FAULT;
+    controller->fault = FI_FAULT_HEARTBEAT_TIMEOUT;
+    return FI_CONTROL_HEARTBEAT_LOST;
+}
+
 static fi_control_result_t enter_fault(fi_controller_t *controller, fi_fault_t fault)
 {
     controller->state = FI_STATE_FAULT;
     controller->fault = fault;
     return FI_CONTROL_EXPIRED;
+}
+
+fi_control_result_t fi_controller_heartbeat(fi_controller_t *controller, uint32_t session_id, uint32_t now_ms)
+{
+    if (controller == NULL) return FI_CONTROL_ERR_ARGUMENT;
+    if (controller->state == FI_STATE_FAULT) return FI_CONTROL_INVALID_STATE;
+    if (session_id != controller->session_id) return FI_CONTROL_SESSION_MISMATCH;
+    if (controller->state != FI_STATE_IDLE && !heartbeat_fresh(controller, now_ms)) {
+        return heartbeat_fault(controller);
+    }
+    controller->heartbeat_seen = 1u;
+    controller->last_heartbeat_ms = now_ms;
+    return FI_CONTROL_OK;
 }
 
 static fi_control_result_t check_identity(
@@ -66,6 +91,7 @@ fi_control_result_t fi_controller_arrive(
     if (session_id != controller->session_id) {
         return FI_CONTROL_SESSION_MISMATCH;
     }
+    if (!heartbeat_fresh(controller, now_ms)) return FI_CONTROL_HEARTBEAT_LOST;
 
     controller->job_id = job_id;
     controller->arrival_ms = now_ms;
@@ -124,6 +150,7 @@ fi_control_result_t fi_controller_apply_result(
     if (deadline_passed(now_ms, controller->auth_deadline_ms)) {
         return enter_fault(controller, FI_FAULT_AUTH_TIMEOUT);
     }
+    if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
     if (seq == 0u || seq <= controller->last_seq) {
         return FI_CONTROL_SEQUENCE_REJECTED;
     }
@@ -149,6 +176,7 @@ fi_control_result_t fi_controller_route_ready(fi_controller_t *controller, uint3
     if (deadline_passed(now_ms, controller->action_deadline_ms)) {
         return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
     }
+    if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
     controller->state = FI_STATE_RELEASE;
     return FI_CONTROL_OK;
 }
@@ -167,6 +195,7 @@ fi_control_result_t fi_controller_release_started(fi_controller_t *controller, u
     if (deadline_passed(now_ms, controller->action_deadline_ms)) {
         return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
     }
+    if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
     controller->state = FI_STATE_VERIFY;
     return FI_CONTROL_OK;
 }
@@ -193,6 +222,7 @@ fi_control_result_t fi_controller_confirm_exit(
     if (deadline_passed(now_ms, controller->action_deadline_ms)) {
         return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
     }
+    if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
     if (observed_route != controller->route) {
         controller->state = FI_STATE_FAULT;
         controller->fault = FI_FAULT_WRONG_EXIT;
@@ -219,6 +249,7 @@ fi_control_result_t fi_controller_tick(fi_controller_t *controller, uint32_t now
         if (deadline_passed(now_ms, controller->auth_deadline_ms)) {
             return enter_fault(controller, FI_FAULT_AUTH_TIMEOUT);
         }
+        if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
         return FI_CONTROL_OK;
     case FI_STATE_SET_ROUTE:
     case FI_STATE_RELEASE:
@@ -226,6 +257,7 @@ fi_control_result_t fi_controller_tick(fi_controller_t *controller, uint32_t now
         if (deadline_passed(now_ms, controller->action_deadline_ms)) {
             return enter_fault(controller, FI_FAULT_ACTION_TIMEOUT);
         }
+        if (!heartbeat_fresh(controller, now_ms)) return heartbeat_fault(controller);
         return FI_CONTROL_OK;
     case FI_STATE_IDLE:
         return FI_CONTROL_OK;

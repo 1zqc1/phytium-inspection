@@ -25,7 +25,7 @@ common/src/controller.c
 
 把 `common/include` 加入编译器头文件路径。公共代码只依赖 C99 标准类型，不使用堆内存、HAL、RTOS 或文件系统。
 
-USART 接收中断或 DMA 空闲中断取得的每个字节送入 `fi_stream_decoder_feed`。只有返回 `FI_STREAM_FRAME_READY` 时才处理业务消息；返回 `FI_STREAM_FRAME_DROPPED` 时记录错误计数并保持执行器禁止，不能调用舵机动作函数。
+USART 接收中断或 DMA 空闲中断取得的每个字节送入 `fi_stream_decoder_feed_timed`，传入单调毫秒计数及经实测确定的字节间超时。超时会丢弃不完整帧并保留当前字节作为新帧候选。只有返回 `FI_STREAM_FRAME_READY` 时才处理业务消息；返回 `FI_STREAM_FRAME_DROPPED` 时记录错误计数并保持执行器禁止，不能调用舵机动作函数。无时间信息的 `fi_stream_decoder_feed` 不提供接收超时保护。
 
 业务层按以下顺序调用控制器：
 
@@ -41,7 +41,7 @@ fi_controller_confirm_exit
 
 主循环或 1 ms 定时任务调用 `fi_controller_tick`。进入 `FI_STATE_FAULT` 后关闭放行授权，由人工清障并用新的会话号调用 `fi_controller_reset`。
 
-`fi_controller_route_ready` 和 `fi_controller_release_started` 需要传入当前单调毫秒计数；截止时刻本身即已超时。调用方仍须在动作前落实硬件禁能并检查心跳；当前公共核心尚未实现心跳门控，不可仅凭这些检查直接上板。
+`fi_controller_route_ready` 和 `fi_controller_release_started` 需要传入当前单调毫秒计数；截止时刻本身即已超时。完整帧通过类型、长度、CRC 和会话校验后，业务层才可将有效心跳送入 `fi_controller_heartbeat`。启动后必须先收到心跳才能接纳新工件；忙碌状态下心跳间隔达到 300 ms 会锁存故障，恢复需人工清障并建立新会话。调用方必须串行化控制器访问，并在硬件输出处落实禁能；这些软件检查尚未经过实板验证。
 
 ## 首次实板检查
 

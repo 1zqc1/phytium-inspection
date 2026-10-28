@@ -29,7 +29,8 @@ typedef enum {
     FI_FAULT_AUTH_TIMEOUT,
     FI_FAULT_ACTION_TIMEOUT,
     FI_FAULT_WRONG_EXIT,
-    FI_FAULT_INVALID_TIMEOUT
+    FI_FAULT_INVALID_TIMEOUT,
+    FI_FAULT_HEARTBEAT_TIMEOUT
 } fi_fault_t;
 
 typedef enum {
@@ -40,7 +41,8 @@ typedef enum {
     FI_CONTROL_JOB_MISMATCH,
     FI_CONTROL_SEQUENCE_REJECTED,
     FI_CONTROL_EXPIRED,
-    FI_CONTROL_ROUTE_MISMATCH
+    FI_CONTROL_ROUTE_MISMATCH,
+    FI_CONTROL_HEARTBEAT_LOST
 } fi_control_result_t;
 
 typedef struct {
@@ -56,6 +58,8 @@ typedef struct {
     uint32_t auth_timeout_ms;
     uint32_t action_timeout_ms;
     uint32_t completed_jobs;
+    uint32_t last_heartbeat_ms;
+    uint8_t heartbeat_seen;
 } fi_controller_t;
 
 void fi_controller_reset(
@@ -63,6 +67,8 @@ void fi_controller_reset(
     uint32_t session_id,
     uint32_t auth_timeout_ms,
     uint32_t action_timeout_ms);
+/* Call only after a complete, valid heartbeat for the current session. */
+fi_control_result_t fi_controller_heartbeat(fi_controller_t *controller, uint32_t session_id, uint32_t now_ms);
 fi_control_result_t fi_controller_arrive(
     fi_controller_t *controller,
     uint32_t session_id,

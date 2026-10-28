@@ -92,6 +92,33 @@ fi_stream_result_t fi_stream_decoder_feed(
 
     status = fi_frame_decode(decoder->buffer, decoder->length, frame);
     reset_decoder(decoder);
+    if (status != FI_OK && byte == FI_MAGIC_0) {
+        decoder->buffer[0] = byte;
+        decoder->length = 1u;
+    }
     *decode_status = status;
     return status == FI_OK ? FI_STREAM_FRAME_READY : FI_STREAM_FRAME_DROPPED;
+}
+
+fi_stream_result_t fi_stream_decoder_feed_timed(
+    fi_stream_decoder_t *decoder, uint8_t byte, fi_frame_t *frame,
+    fi_status_t *decode_status, uint32_t now_ms, uint32_t interbyte_timeout_ms)
+{
+    int expired;
+    fi_stream_result_t result;
+    if (decoder == NULL || frame == NULL || decode_status == NULL
+        || interbyte_timeout_ms == 0u || interbyte_timeout_ms >= 0x80000000u) {
+        if (decode_status != NULL) *decode_status = FI_ERR_ARGUMENT;
+        return FI_STREAM_FRAME_DROPPED;
+    }
+    expired = decoder->length != 0u
+        && (uint32_t)(now_ms - decoder->last_byte_ms) >= interbyte_timeout_ms;
+    if (expired) reset_decoder(decoder);
+    result = fi_stream_decoder_feed(decoder, byte, frame, decode_status);
+    decoder->last_byte_ms = now_ms;
+    if (expired && result == FI_STREAM_NEED_MORE) {
+        *decode_status = FI_ERR_TIMEOUT;
+        return FI_STREAM_FRAME_DROPPED;
+    }
+    return result;
 }

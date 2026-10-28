@@ -12,6 +12,7 @@
 static int prepare_job(fi_controller_t *controller, uint32_t job_id)
 {
     fi_controller_reset(controller, SIM_SESSION, 1000u, 2000u);
+    if (fi_controller_heartbeat(controller, SIM_SESSION, 100u) != FI_CONTROL_OK) return 1;
     if (fi_controller_arrive(controller, SIM_SESSION, job_id, 100u) != FI_CONTROL_OK) {
         return 1;
     }
@@ -38,6 +39,13 @@ static fi_control_result_t deliver_result(
     size_t length = 0u;
     size_t i;
 
+    while ((uint32_t)(now_ms - controller->last_heartbeat_ms) >= 100u) {
+        if (fi_controller_heartbeat(controller, SIM_SESSION,
+                controller->last_heartbeat_ms + 100u) != FI_CONTROL_OK) {
+            return FI_CONTROL_HEARTBEAT_LOST;
+        }
+    }
+
     memset(&input, 0, sizeof(input));
     input.type = FI_MSG_RESULT;
     input.session_id = SIM_SESSION;
@@ -60,6 +68,10 @@ static fi_control_result_t deliver_result(
             return FI_CONTROL_ERR_ARGUMENT;
         }
         if (stream_result == FI_STREAM_FRAME_READY) {
+            if (decoded.type != FI_MSG_RESULT || decoded.payload_length != 1u) {
+                report->rejected_frames += 1u;
+                return FI_CONTROL_ERR_ARGUMENT;
+            }
             fi_control_result_t control_result = fi_controller_apply_result(
                 controller,
                 decoded.session_id,
@@ -106,6 +118,7 @@ static int simulate_completed_route(fi_route_t route, fi_sim_report_t *report)
     }
     if (fi_controller_route_ready(&controller, 1u, 600u) != FI_CONTROL_OK
         || fi_controller_release_started(&controller, 1u, 700u) != FI_CONTROL_OK
+        || fi_controller_heartbeat(&controller, SIM_SESSION, 700u) != FI_CONTROL_OK
         || fi_controller_confirm_exit(&controller, SIM_SESSION, 1u, route, 900u)
             != FI_CONTROL_OK) {
         return 1;
@@ -157,11 +170,13 @@ int fi_simulate_duplicate(fi_sim_report_t *report)
             != FI_CONTROL_OK
         || fi_controller_route_ready(&controller, 1u, 600u) != FI_CONTROL_OK
         || fi_controller_release_started(&controller, 1u, 700u) != FI_CONTROL_OK
+        || fi_controller_heartbeat(&controller, SIM_SESSION, 700u) != FI_CONTROL_OK
         || fi_controller_confirm_exit(&controller, SIM_SESSION, 1u, FI_ROUTE_PASS, 900u)
             != FI_CONTROL_OK) {
         return 1;
     }
-    if (fi_controller_arrive(&controller, SIM_SESSION, 2u, 1000u) != FI_CONTROL_OK
+    if (fi_controller_heartbeat(&controller, SIM_SESSION, 1000u) != FI_CONTROL_OK
+        || fi_controller_arrive(&controller, SIM_SESSION, 2u, 1000u) != FI_CONTROL_OK
         || fi_controller_begin_stabilization(&controller) != FI_CONTROL_OK
         || fi_controller_request_capture(&controller) != FI_CONTROL_OK) {
         return 1;

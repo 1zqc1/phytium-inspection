@@ -25,7 +25,8 @@ typedef enum {
     FI_ERR_VERSION,
     FI_ERR_TYPE,
     FI_ERR_LENGTH,
-    FI_ERR_CRC
+    FI_ERR_CRC,
+    FI_ERR_TIMEOUT
 } fi_status_t;
 
 typedef enum {

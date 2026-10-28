@@ -194,12 +194,41 @@ static void test_stream_decoder_recovers_after_noise_and_bad_frame(void)
     CHECK(ready_count == 2u);
 }
 
+static void test_stream_timeout_preserves_new_frame_start(void)
+{
+    fi_frame_t input = sample_frame(), output;
+    fi_stream_decoder_t decoder;
+    fi_status_t status = FI_OK;
+    uint8_t bytes[FI_MAX_FRAME_SIZE];
+    size_t length = 0u, i;
+    CHECK(fi_frame_encode(&input, bytes, sizeof(bytes), &length) == FI_OK);
+    fi_stream_decoder_init(&decoder);
+    CHECK(fi_stream_decoder_feed_timed(&decoder, 0xA5u, &output, &status, 0u, 10u) == FI_STREAM_NEED_MORE);
+    CHECK(fi_stream_decoder_feed_timed(&decoder, 0x5Au, &output, &status, 1u, 10u) == FI_STREAM_NEED_MORE);
+    CHECK(fi_stream_decoder_feed_timed(&decoder, bytes[0], &output, &status, 11u, 10u) == FI_STREAM_FRAME_DROPPED);
+    CHECK(status == FI_ERR_TIMEOUT);
+    for (i = 1u; i + 1u < length; ++i) {
+        CHECK(fi_stream_decoder_feed_timed(&decoder, bytes[i], &output, &status, 11u, 10u) == FI_STREAM_NEED_MORE);
+    }
+    CHECK(fi_stream_decoder_feed_timed(&decoder, bytes[length - 1u], &output, &status, 11u, 10u) == FI_STREAM_FRAME_READY);
+    CHECK(output.job_id == input.job_id);
+}
+
 static void drive_to_wait_result(fi_controller_t *controller, uint32_t session, uint32_t job)
 {
+    CHECK(fi_controller_heartbeat(controller, session, 100u) == FI_CONTROL_OK);
     CHECK(fi_controller_arrive(controller, session, job, 100u) == FI_CONTROL_OK);
     CHECK(fi_controller_begin_stabilization(controller) == FI_CONTROL_OK);
     CHECK(fi_controller_request_capture(controller) == FI_CONTROL_OK);
     CHECK(controller->state == FI_STATE_WAIT_RESULT);
+}
+
+static void heartbeat_until(fi_controller_t *controller, uint32_t now_ms)
+{
+    while ((uint32_t)(now_ms - controller->last_heartbeat_ms) >= 100u) {
+        CHECK(fi_controller_heartbeat(controller, controller->session_id,
+            controller->last_heartbeat_ms + 100u) == FI_CONTROL_OK);
+    }
 }
 
 static void test_controller_completes_one_normal_job(void)
@@ -209,13 +238,16 @@ static void test_controller_completes_one_normal_job(void)
     fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
     CHECK(controller.state == FI_STATE_IDLE);
     drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_SET_ROUTE);
+    heartbeat_until(&controller, 600u);
     CHECK(fi_controller_route_ready(&controller, 7u, 600u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_RELEASE);
     CHECK(fi_controller_release_started(&controller, 7u, 700u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_VERIFY);
+    heartbeat_until(&controller, 900u);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_PASS, 900u) == FI_CONTROL_OK);
     CHECK(controller.state == FI_STATE_IDLE);
@@ -229,18 +261,24 @@ static void test_controller_rejects_duplicate_and_wrong_job(void)
 
     fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
     drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 400u);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 8u, 1u, FI_ROUTE_PASS, 400u) == FI_CONTROL_JOB_MISMATCH);
     CHECK(controller.state == FI_STATE_WAIT_RESULT);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_REVIEW, 400u) == FI_CONTROL_OK);
     CHECK(controller.route == FI_ROUTE_REVIEW);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_route_ready(&controller, 7u, 500u) == FI_CONTROL_OK);
     CHECK(fi_controller_release_started(&controller, 7u, 600u) == FI_CONTROL_OK);
+    heartbeat_until(&controller, 700u);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_REVIEW, 700u) == FI_CONTROL_OK);
 
-    drive_to_wait_result(&controller, 0x1001u, 8u);
+    CHECK(fi_controller_heartbeat(&controller, 0x1001u, 800u) == FI_CONTROL_OK);
+    CHECK(fi_controller_arrive(&controller, 0x1001u, 8u, 800u) == FI_CONTROL_OK);
+    CHECK(fi_controller_begin_stabilization(&controller) == FI_CONTROL_OK);
+    CHECK(fi_controller_request_capture(&controller) == FI_CONTROL_OK);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 8u, 1u, FI_ROUTE_PASS, 800u) == FI_CONTROL_SEQUENCE_REJECTED);
     CHECK(controller.state == FI_STATE_WAIT_RESULT);
@@ -259,11 +297,43 @@ static void test_controller_enforces_local_deadlines(void)
 
     fi_controller_reset(&controller, 0x1002u, 1000u, 2000u);
     drive_to_wait_result(&controller, 0x1002u, 8u);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_apply_result(
         &controller, 0x1002u, 8u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(fi_controller_tick(&controller, 2501u) == FI_CONTROL_EXPIRED);
     CHECK(controller.state == FI_STATE_FAULT);
     CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
+}
+
+static void test_heartbeat_gates_actions(void)
+{
+    fi_controller_t controller;
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    CHECK(fi_controller_arrive(&controller, 0x1001u, 7u, 100u) == FI_CONTROL_HEARTBEAT_LOST);
+    CHECK(fi_controller_heartbeat(&controller, 0x1002u, 100u) == FI_CONTROL_SESSION_MISMATCH);
+    CHECK(fi_controller_heartbeat(&controller, 0x1001u, 100u) == FI_CONTROL_OK);
+    CHECK(fi_controller_arrive(&controller, 0x1001u, 7u, 399u) == FI_CONTROL_OK);
+    CHECK(fi_controller_tick(&controller, 400u) == FI_CONTROL_HEARTBEAT_LOST);
+    CHECK(controller.state == FI_STATE_FAULT);
+    CHECK(controller.fault == FI_FAULT_HEARTBEAT_TIMEOUT);
+    CHECK(fi_controller_heartbeat(&controller, 0x1001u, 401u) == FI_CONTROL_INVALID_STATE);
+
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 400u) == FI_CONTROL_HEARTBEAT_LOST);
+    CHECK(controller.fault == FI_FAULT_HEARTBEAT_TIMEOUT);
+
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    CHECK(fi_controller_heartbeat(&controller, 0x1001u, 400u) == FI_CONTROL_HEARTBEAT_LOST);
+    CHECK(controller.state == FI_STATE_FAULT);
+
+    fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
+    drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 500u);
+    CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
+    CHECK(fi_controller_route_ready(&controller, 7u, 800u) == FI_CONTROL_HEARTBEAT_LOST);
+    CHECK(controller.state == FI_STATE_FAULT);
 }
 
 static void test_deadline_is_exclusive(void)
@@ -289,12 +359,15 @@ static void test_action_transitions_reject_expired_deadline_without_tick(void)
     fi_controller_t controller;
     fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
     drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(fi_controller_route_ready(&controller, 7u, 2500u) == FI_CONTROL_EXPIRED);
     CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
     fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
     drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_apply_result(&controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
+    heartbeat_until(&controller, 2499u);
     CHECK(fi_controller_route_ready(&controller, 7u, 2499u) == FI_CONTROL_OK);
     CHECK(fi_controller_release_started(&controller, 7u, 2500u) == FI_CONTROL_EXPIRED);
     CHECK(controller.fault == FI_FAULT_ACTION_TIMEOUT);
@@ -306,10 +379,12 @@ static void test_controller_faults_on_wrong_exit(void)
 
     fi_controller_reset(&controller, 0x1001u, 1000u, 2000u);
     drive_to_wait_result(&controller, 0x1001u, 7u);
+    heartbeat_until(&controller, 500u);
     CHECK(fi_controller_apply_result(
         &controller, 0x1001u, 7u, 1u, FI_ROUTE_PASS, 500u) == FI_CONTROL_OK);
     CHECK(fi_controller_route_ready(&controller, 7u, 600u) == FI_CONTROL_OK);
     CHECK(fi_controller_release_started(&controller, 7u, 700u) == FI_CONTROL_OK);
+    heartbeat_until(&controller, 900u);
     CHECK(fi_controller_confirm_exit(
         &controller, 0x1001u, 7u, FI_ROUTE_REVIEW, 900u) == FI_CONTROL_ROUTE_MISMATCH);
     CHECK(controller.state == FI_STATE_FAULT);
@@ -378,9 +453,11 @@ int main(void)
     run_test("oversized payload rejection", test_frame_encode_rejects_oversized_payload);
     run_test("fragmented stream frame", test_stream_decoder_accepts_fragmented_frame);
     run_test("stream resynchronization", test_stream_decoder_recovers_after_noise_and_bad_frame);
+    run_test("stream timeout recovery", test_stream_timeout_preserves_new_frame_start);
     run_test("controller normal job", test_controller_completes_one_normal_job);
     run_test("controller duplicate and job rejection", test_controller_rejects_duplicate_and_wrong_job);
     run_test("controller local deadlines", test_controller_enforces_local_deadlines);
+    run_test("heartbeat gates actions", test_heartbeat_gates_actions);
     run_test("deadline is exclusive", test_deadline_is_exclusive);
     run_test("invalid timeout is rejected", test_timeout_configuration_outside_wrap_safe_range_is_rejected);
     run_test("expired transitions without tick", test_action_transitions_reject_expired_deadline_without_tick);
